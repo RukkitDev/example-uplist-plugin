@@ -1,0 +1,5 @@
+author: wtbdev
+name: uplist-plugin
+version: 1.0.0
+apiVersion: ANY
+pluginClass: cn.rukkit.uplistplugin.MainPlugin
