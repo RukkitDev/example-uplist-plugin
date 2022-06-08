@@ -1,9 +1,19 @@
 package cn.rukkit.uplistplugin;
+
 import cn.rukkit.Rukkit;
+import cn.rukkit.command.ChatCommand;
 import cn.rukkit.command.ChatCommandListener;
 import cn.rukkit.config.RoundConfig;
 import cn.rukkit.network.Connection;
 import cn.rukkit.plugin.RukkitPlugin;
+import com.alibaba.fastjson.JSON;
+import com.alibaba.fastjson.JSONObject;
+import com.alibaba.fastjson.util.Base64;
+import org.slf4j.Logger;
+import org.yaml.snakeyaml.DumperOptions;
+import org.yaml.snakeyaml.Yaml;
+import org.yaml.snakeyaml.constructor.CustomClassLoaderConstructor;
+
 import java.io.File;
 import java.io.FileInputStream;
 import java.io.FileWriter;
@@ -24,7 +34,6 @@ import com.alibaba.fastjson.util.Base64;
 import org.yaml.snakeyaml.constructor.CustomClassLoaderConstructor;
 import cn.rukkit.command.ChatCommand;
 import java.util.concurrent.ScheduledFuture;
-
 
 public class MainPlugin extends RukkitPlugin {
 	
@@ -70,15 +79,10 @@ public class MainPlugin extends RukkitPlugin {
 	
 	private void addServer(final Connection conn) {
 		FormBody.Builder formBody = new FormBody.Builder();
-        formBody.add("Passwd", "false");
-        formBody.add("ServerName", config.serverName);
-        formBody.add("Port", "" + Rukkit.getConfig().serverPort);
-        formBody.add("MapName",Rukkit.getRoundConfig().mapName);
-        formBody.add("PlayerSize", "" + Rukkit.getConnectionManager().size());
-        formBody.add("PlayerMaxSize", "" + Rukkit.getConfig().maxPlayer);
+        formBody.add("Version", "HPS#1");
 		OkHttpClient client = new OkHttpClient();
 		Request req = new Request.Builder().
-						url("https://api.data.der.kim/UpList/v3/upList").
+						url("https://api.data.der.kim/UpList/v5/upList").
 						post(formBody.build()).
 						build();
 		Call call = client.newCall(req);
@@ -104,9 +108,18 @@ public class MainPlugin extends RukkitPlugin {
 						removeData = base64ToString(obj.getString("remove"));
 						/*conn.sendServerMessage(String.format("Result: sid=%s, add=%s, open=%s, update=%s, remove=%s",
 															sid, addData, selfCheckData, updateData, removeData));*/
-						String targetData = addData.replace("{0}", config.createdBy).
-													replace("{1}", "10.0.0.1").
-													replace("{2}", config.serverName);
+
+
+						String targetData = addData.replace("{RW-HPS.S.NAME}", config.serverName).
+													replace("{RW-HPS.S.PRIVATE.IP}", "10.0.0.1").
+													replace("{RW-HPS.S.PORT}", Rukkit.getConfig().serverPort).
+													replace("{RW-HPS.RW.MAP.NAME}", Rukkit.getRoundConfig().mapName).
+													replace("{RW-HPS.PLAYER.SIZE}", Rukkit.getConnectionManager().size()).
+													replace("{RW-HPS.PLAYER.SIZE.MAX}", Rukkit.getConfig().maxPlayer).
+													replace("{RW-HPS.RW.VERSION}", "1.14").
+													replace("{RW-HPS.RW.VERSION.INT}", "151").
+													replace("{RW-HPS.RW.IS.VERSION}", "false").
+													replace("{RW-HPS.RW.IS.PASSWD}", "false");
 						Callback back = new Callback() {
 
 							@Override
@@ -134,6 +147,30 @@ public class MainPlugin extends RukkitPlugin {
 						};
 						post("http://gs1.corrodinggames.com/masterserver/1.4/interface", targetData, back);
 						post("http://gs4.corrodinggames.net/masterserver/1.4/interface", targetData, back);
+
+						String check = selfCheckData.replace("{RW-HPS.S.PORT}", Rukkit.getConfig().serverPort);
+
+						Callback backCheck = new Callback() {
+
+							@Override
+							public void onFailure(Call p1, IOException p2) {
+								log.warn("IO Exception:", p2);
+							}
+
+							@Override
+							public void onResponse(Call p1, Response rep) throws IOException {
+								String result = rep.body().string();
+								if (result.contains("true")) {
+									log.info("Server was Port pubished.");
+									conn.sendServerMessage("Server Port published!");
+								} else {
+									log.info("Server was Port not pubished.");
+									conn.sendServerMessage("Server Port Not published!");
+								}
+							}
+						};
+						post("http://gs1.corrodinggames.com/masterserver/1.4/interface", check, backCheck);
+						post("http://gs4.corrodinggames.net/masterserver/1.4/interface", check, backCheck);
 					}
 				}
 			});
@@ -175,14 +212,19 @@ public class MainPlugin extends RukkitPlugin {
 	}
 	
 	private void updateServer() {
-		String targetData = updateData.replace("{0}", config.createdBy).
-									replace("{1}", config.serverName);
+		String targetData = updateData.replace("{RW-HPS.S.NAME}", config.serverName).
+										replace("{RW-HPS.S.PRIVATE.IP}", "10.0.0.1").
+										replace("{RW-HPS.S.PORT}", Rukkit.getConfig().serverPort).
+										replace("{RW-HPS.RW.MAP.NAME}", Rukkit.getRoundConfig().mapName).
+										replace("{RW-HPS.PLAYER.SIZE}", Rukkit.getConnectionManager().size()).
+										replace("{RW-HPS.PLAYER.SIZE.MAX}", Rukkit.getConfig().maxPlayer).
+										replace("{RW-HPS.RW.IS.PASSWD}", "false");
+
 		if (!Rukkit.getConfig().nonStopMode) {
-			targetData = targetData.replace("{2}", Rukkit.getGameServer().isGaming() ? "ingame": "battleroom");
+			targetData = targetData.replace("{RW-HPS.S.STATUS}", Rukkit.getGameServer().isGaming() ? "ingame": "battleroom");
 		} else {
-			targetData = targetData.replace("{2}", "battleroom");
+			targetData = targetData.replace("{RW-HPS.S.STATUS}", "battleroom");
 		}
-		targetData = targetData.replace("{3}", "" + Rukkit.getConnectionManager().size());
 		Callback back = new Callback() {
 
 			@Override
