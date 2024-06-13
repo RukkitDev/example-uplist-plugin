@@ -82,7 +82,7 @@ public class MainPlugin extends RukkitPlugin {
         formBody.add("Version", "HPS#1");
 		OkHttpClient client = new OkHttpClient();
 		Request req = new Request.Builder().
-						url("https://api.data.der.kim/UpList/v5/upList").
+						url("https://api.data.der.kim/UpList/v5/upList-RT").
 						post(formBody.build()).
 						build();
 		Call call = client.newCall(req);
@@ -99,11 +99,7 @@ public class MainPlugin extends RukkitPlugin {
 						conn.sendServerMessage("API Error:" + result);
 					} else if (result.startsWith("[-2]")) {
 						conn.sendServerMessage("You are in the blacklist:" + result);
-					} else if (result.startsWith("[-4]")) {
-						conn.sendServerMessage("Need use New Api URL");
-					} else if (result.startsWith("[-5]")) {
-						conn.sendServerMessage("API Info:" + result);
-					}  else {
+					} else {
 						JSONObject obj = JSON.parseObject(result);
 						sid = base64ToString(obj.getString("id"));
 						addData = base64ToString(obj.getString("add"));
