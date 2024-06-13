@@ -1,44 +1,21 @@
 package cn.rukkit.uplistplugin;
 
 import cn.rukkit.Rukkit;
-import cn.rukkit.command.ChatCommand;
-import cn.rukkit.command.ChatCommandListener;
-import cn.rukkit.config.RoundConfig;
-import cn.rukkit.network.Connection;
+import cn.rukkit.command.ServerCommand;
+import cn.rukkit.command.ServerCommandListener;
 import cn.rukkit.plugin.RukkitPlugin;
 import com.alibaba.fastjson.JSON;
 import com.alibaba.fastjson.JSONObject;
 import com.alibaba.fastjson.util.Base64;
+import okhttp3.*;
 import org.slf4j.Logger;
-import org.yaml.snakeyaml.DumperOptions;
-import org.yaml.snakeyaml.Yaml;
-import org.yaml.snakeyaml.constructor.CustomClassLoaderConstructor;
 
-import java.io.File;
-import java.io.FileInputStream;
-import java.io.FileWriter;
 import java.io.IOException;
-import okhttp3.FormBody;
-import org.yaml.snakeyaml.DumperOptions;
-import org.yaml.snakeyaml.Yaml;
-import org.slf4j.Logger;
-import okhttp3.OkHttpClient;
-import okhttp3.Request;
-import okhttp3.RequestBody;
-import okhttp3.Call;
-import okhttp3.Callback;
-import okhttp3.Response;
-import com.alibaba.fastjson.JSONObject;
-import com.alibaba.fastjson.JSON;
-import com.alibaba.fastjson.util.Base64;
-import org.yaml.snakeyaml.constructor.CustomClassLoaderConstructor;
-import cn.rukkit.command.ChatCommand;
 import java.util.concurrent.ScheduledFuture;
 
 public class MainPlugin extends RukkitPlugin {
-	
-	private UplistConfig config;
-	private Logger log = getLogger();
+
+	private Logger log;
 	private String addData;
 	private String updateData;
 	private String removeData;
@@ -54,30 +31,64 @@ public class MainPlugin extends RukkitPlugin {
 			updateServer();
 		}
 	}
-	
-	private final void loadConfig() throws IOException {
-		if (config != null) return;
-		Yaml yaml = new Yaml(new CustomClassLoaderConstructor(UplistConfig.class, new UplistConfig().getClass().getClassLoader()));
-		File confFile = getConfigFile("uplist");
-		if (confFile.exists() && confFile.isFile() && confFile.length() > 0) {
-			getLogger().debug("Found Config file.Reading...");
-		} else {
-			getLogger().debug("Config file.not found.Creating...");
-			confFile.delete();
-			confFile.createNewFile();
-			FileWriter writer = new FileWriter(confFile);
-			writer.write(yaml.dumpAs(new UplistConfig(), null, DumperOptions.FlowStyle.BLOCK));
-			writer.flush();
-			writer.close();
+
+	public class PublishServerCommandListener implements ServerCommandListener {
+		@Override
+		public void onSend(String[] strings) {
+			if (strings.length == 0) {
+				System.out.println("== 列表插件帮助 == \n" +
+						"publish start 启动列表公开\n" +
+						"publish stop 关闭列表公开\n" +
+						"publish motd <内容> 设置服务器motd\n" +
+						"publish state 查看公开状态");
+				return;
+			}
+			switch (strings[0]) {
+				case "start":
+					if (isPublished) {
+						System.out.println("服务器已经公开！");
+					} else {
+						addServer();
+					}
+					break;
+				case "stop":
+					if (!isPublished) {
+						System.out.println("公开状态已经关闭");
+					} else {
+						stopServer();
+					}
+					break;
+				case "motd":
+					if (strings.length > 1) {
+						Rukkit.getConfig().serverMotd = strings[1];
+						System.out.println("更改成功！");
+						if (isPublished) updateServer();
+					} else {
+						System.out.println("请填写服务器motd！");
+					}
+					break;
+				case "state":
+					System.out.println("== 列表公开状态 ==\n" +
+							"服务状态: " + (isPublished ? "已启动" : "未启动") + "\n" +
+							"服务器在线状态:" + (upState ? "是" : "否"));
+					break;
+				case "help":
+				default:
+					System.out.println("== 列表插件帮助 == \n" +
+							"publish start 启动列表公开\n" +
+							"publish stop 关闭列表公开\n" +
+							"publish motd <内容> 设置服务器motd\n" +
+							"publish state 查看公开状态\n" +
+							"publish help 查看此帮助");
+			}
 		}
-		config = yaml.loadAs((new FileInputStream(confFile)), new UplistConfig().getClass());
 	}
 	
 	private String base64ToString(String base64) {
 		return new String(Base64.decodeFast(base64));
 	}
 	
-	private void addServer(final Connection conn) {
+	private void addServer() {
 		FormBody.Builder formBody = new FormBody.Builder();
         formBody.add("Version", "HPS#1");
 		OkHttpClient client = new OkHttpClient();
@@ -89,16 +100,16 @@ public class MainPlugin extends RukkitPlugin {
 		call.enqueue(new Callback() {
 				@Override
 				public void onFailure(Call p1, IOException p2) {
-					conn.sendServerMessage("Network error!");
+					log.warn("Network error!");
 				}
 
 				@Override
 				public void onResponse(Call p1, Response rep) throws IOException {
 					String result = rep.body().string();
 					if (result.startsWith("[-1]")) {
-						conn.sendServerMessage("API Error:" + result);
+						log.warn("API Error:" + result);
 					} else if (result.startsWith("[-2]")) {
-						conn.sendServerMessage("You are in the blacklist:" + result);
+						log.warn("You are in the blacklist:" + result);
 					} else {
 						JSONObject obj = JSON.parseObject(result);
 						sid = base64ToString(obj.getString("id"));
@@ -110,14 +121,14 @@ public class MainPlugin extends RukkitPlugin {
 															sid, addData, selfCheckData, updateData, removeData));*/
 
 
-						String targetData = addData.replace("{RW-HPS.S.NAME}", config.serverName).
+						String targetData = addData.replace("{RW-HPS.S.NAME}", Rukkit.getConfig().serverUser).
 													replace("{RW-HPS.S.PRIVATE.IP}", "10.0.0.1").
-													replace("{RW-HPS.S.PORT}", Rukkit.getConfig().serverPort).
-													replace("{RW-HPS.RW.MAP.NAME}", Rukkit.getRoundConfig().mapName).
-													replace("{RW-HPS.PLAYER.SIZE}", Rukkit.getConnectionManager().size()).
-													replace("{RW-HPS.PLAYER.SIZE.MAX}", Rukkit.getConfig().maxPlayer).
-													replace("{RW-HPS.RW.VERSION}", "1.14").
-													replace("{RW-HPS.RW.VERSION.INT}", "151").
+													replace("{RW-HPS.S.PORT}", String.valueOf(Rukkit.getConfig().serverPort)).
+													replace("{RW-HPS.RW.MAP.NAME}", Rukkit.getConfig().serverMotd).
+													replace("{RW-HPS.PLAYER.SIZE}", String.valueOf(Rukkit.getGlobalConnectionManager().size())).
+													replace("{RW-HPS.PLAYER.SIZE.MAX}", String.valueOf(Rukkit.getConfig().maxPlayer * Rukkit.getConfig().maxRoom)).
+													replace("{RW-HPS.RW.VERSION}", "1.15").
+													replace("{RW-HPS.RW.VERSION.INT}", "176").
 													replace("{RW-HPS.RW.IS.VERSION}", "false").
 													replace("{RW-HPS.RW.IS.PASSWD}", "false");
 						Callback back = new Callback() {
@@ -135,20 +146,18 @@ public class MainPlugin extends RukkitPlugin {
 									log.info("Server was pubished.");
 									log.debug("OK!");
 									updateFuture = Rukkit.getThreadManager().schedule(new UpdateTask(), 1000*15, 1000*15);
-									conn.sendServerMessage("Server published!");
 									isPublished = true;
 								} else {
 									upState = false;
 									log.warn("Server publish failed.");
 									log.debug("FAIL!");
-									conn.sendServerMessage("Server publish failed!");
 								}
 							}
 						};
 						post("http://gs1.corrodinggames.com/masterserver/1.4/interface", targetData, back);
 						post("http://gs4.corrodinggames.net/masterserver/1.4/interface", targetData, back);
 
-						String check = selfCheckData.replace("{RW-HPS.S.PORT}", Rukkit.getConfig().serverPort);
+						String check = selfCheckData.replace("{RW-HPS.S.PORT}", String.valueOf(Rukkit.getConfig().serverPort));
 
 						Callback backCheck = new Callback() {
 
@@ -162,10 +171,8 @@ public class MainPlugin extends RukkitPlugin {
 								String result = rep.body().string();
 								if (result.contains("true")) {
 									log.info("Server was Port pubished.");
-									conn.sendServerMessage("Server Port published!");
 								} else {
 									log.info("Server was Port not pubished.");
-									conn.sendServerMessage("Server Port Not published!");
 								}
 							}
 						};
@@ -212,24 +219,26 @@ public class MainPlugin extends RukkitPlugin {
 	}
 	
 	private void updateServer() {
-		String targetData = updateData.replace("{RW-HPS.S.NAME}", config.serverName).
+		String targetData = updateData.replace("{RW-HPS.S.NAME}", Rukkit.getConfig().serverUser).
 										replace("{RW-HPS.S.PRIVATE.IP}", "10.0.0.1").
-										replace("{RW-HPS.S.PORT}", Rukkit.getConfig().serverPort).
-										replace("{RW-HPS.RW.MAP.NAME}", Rukkit.getRoundConfig().mapName).
-										replace("{RW-HPS.PLAYER.SIZE}", Rukkit.getConnectionManager().size()).
-										replace("{RW-HPS.PLAYER.SIZE.MAX}", Rukkit.getConfig().maxPlayer).
+										replace("{RW-HPS.S.PORT}", String.valueOf(Rukkit.getConfig().serverPort)).
+										replace("{RW-HPS.RW.MAP.NAME}", Rukkit.getConfig().serverMotd).
+										replace("{RW-HPS.PLAYER.SIZE}", String.valueOf(Rukkit.getGlobalConnectionManager().size())).
+										replace("{RW-HPS.PLAYER.SIZE.MAX}", String.valueOf(Rukkit.getConfig().maxPlayer * Rukkit.getConfig().maxRoom)).
 										replace("{RW-HPS.RW.IS.PASSWD}", "false");
 
-		if (!Rukkit.getConfig().nonStopMode) {
-			targetData = targetData.replace("{RW-HPS.S.STATUS}", Rukkit.getGameServer().isGaming() ? "ingame": "battleroom");
-		} else {
-			targetData = targetData.replace("{RW-HPS.S.STATUS}", "battleroom");
-		}
+		targetData = targetData.replace("{RW-HPS.S.STATUS}", Rukkit.getRoomManager().getAvailableRoom() == null ? "ingame": "battleroom");
+		// 已弃用
+//		if (!Rukkit.getConfig().nonStopMode) {
+//
+//		} else {
+//			targetData = targetData.replace("{RW-HPS.S.STATUS}", "battleroom");
+//		}
 		Callback back = new Callback() {
 
 			@Override
 			public void onFailure(Call p1, IOException p2) {
-				log.warn("IO Exception:", p2);
+				log.warn("Updating Server:: IO Exception:", p2);
 			}
 
 			@Override
@@ -240,6 +249,7 @@ public class MainPlugin extends RukkitPlugin {
 					log.debug("OK!");
 				} else {
 					upState = false;
+					log.warn("Warning: Updating server error: {}", result);
 					log.debug("FAIL!");
 				}
 			}
@@ -250,65 +260,20 @@ public class MainPlugin extends RukkitPlugin {
 	
 	private void stopServer() {
 		post("http://gs1.corrodinggames.com/masterserver/1.4/interface", removeData);
+		post("http://gs4.corrodinggames.net/masterserver/1.4/interface", removeData);
 		Rukkit.getThreadManager().shutdownTask(updateFuture);
 		isPublished = false;
 		upState = false;
 	}
 	
-	class PublishCommandListener implements ChatCommandListener {
-		@Override
-		public boolean onSend(Connection conn, String[] args) {
-			if (args.length <= 0) {
-				if (isPublished) {
-					conn.sendServerMessage("Server already published!");
-				} else {
-					addServer(conn);
-				}
-			} else {
-				switch (args[0]) {
-					case "info":
-						conn.sendServerMessage("upState(在线状态)=" + upState + "\n" +
-												"isPublished(是否公布)=" + isPublished);
-						break;
-					case "update":
-						conn.sendServerMessage("Updating...");
-						updateServer();
-						break;
-					case "stop":
-						conn.sendServerMessage("Stopped!");
-						stopServer();
-						break;
-					case "motd":
-						if (args.length >= 2) {
-							config.serverName = args[1];
-							conn.sendServerMessage("Change complete!");
-						} else {
-							conn.sendServerMessage("Not enough parameters! 参数不足！");
-						}
-						break;
-					case "help":
-					default:
-						conn.sendServerMessage("uplist help:\n" +
-												".publish info: show currect uplist info. 显示当前服务器公布状态\n" +
-												".publish update: update server state now. 更新当前服务器状态\n" +
-												".publish stop: stop a uplist. 停止公布服务器\n" +
-												".publish motd <motd>: change server motd. 更改服务器MOTD\n");
-				}
-			}
-			return false;
-		}
-	}
-	
 	@Override
 	public void onLoad() {
-		log.info("UplistPluginb:init");
-		try {
-			loadConfig();
-		} catch (IOException e) {
-			log.error("Config load failed.Stopped loading.", e);
-			throw new RuntimeException("Plugin config load failed.");
-		}
-		Rukkit.getCommandManager().registerCommand(new ChatCommand("publish", "Publish server.", 2, new PublishCommandListener(), this));
+		log = getLogger();
+		log.info("UplistPlugin:init");
+		log.info("Server MOTD: {}", Rukkit.getConfig().serverMotd);
+		log.info("Server UUID: {}", Rukkit.getConfig().UUID);
+		log.info("Server User: {}", Rukkit.getConfig().serverUser);
+		Rukkit.getCommandManager().registerServerCommand(new ServerCommand("publish", "列表公开插件命令", 2, new PublishServerCommandListener(), this));
 	}
 	
 	@Override
